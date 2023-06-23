@@ -51,7 +51,6 @@ for waveforms, targets in dataloader:
     ...
 ```
 
-
 ##Motivation
 The `tsa.SpecAugment` provides support of spectral augmentations on TPUs.
 There are several problems with direct use of built-in `torch` and `torchaudio` 
