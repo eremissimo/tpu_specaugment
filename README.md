@@ -4,9 +4,9 @@ This is a tiny library for spectral augmentations on xla devices. \
 List of supported transforms:
 * STFT -- Short Time Fourier Transform
 * ISTFT -- Inverse Short Time Fourier Transform
-* Frequency Masking -- randomly zeros out a span of n frequency bins, $n \in [0, max_mask_len]$
-* Time Stretch -- stretches the input spectrogram with a random rate from $[1/max_rate, max_rate]$ 
-* Pitch Shift -- randomly shifts the pitch by n semitones, $n \in [-max_semitones, max_mask_len]$
+* Frequency Masking -- randomly zeros out a span of $n$ frequency bins, $`n \in `$ [0,  max_mask_len]
+* Time Stretch -- stretches the input spectrogram with a logarithmically spaced random rate from [1/max_rate, max_rate] 
+* Pitch Shift -- randomly shifts the pitch by $n$ semitones, $`n \in `$ [-max_semitones, max_semitones]
 
 The transforms instantiating is as simple as 
 ```python
