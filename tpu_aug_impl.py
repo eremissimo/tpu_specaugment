@@ -319,7 +319,7 @@ class RandomRateGenerator:
 
 class TimeStretchModule(nn.Module):
     def __init__(self, n_fft: int = 1024, hop_length: Optional[int] = None,
-                 max_rate: float = 1.1, random_rate_gen: Optional[RandomRateGenerator] = None):
+                 max_rate: float = 1.1, rate_gen: Optional[RandomRateGenerator] = None):
         super().__init__()
         if max_rate <= 1.:
             raise ValueError("max_rate is supposed to be >1.0 so as the actual rate "
@@ -327,8 +327,8 @@ class TimeStretchModule(nn.Module):
         n_freq = n_fft // 2 + 1
         hop_length = hop_length or n_fft // 4           # as in librosa
         self.max_rate = float(max_rate)
-        self.random_rate_gen = random_rate_gen
-        if random_rate_gen is not None:
+        self.random_rate_gen = rate_gen
+        if rate_gen is not None:
             self.random_rate_gen.set_ts_max_rate(self.max_rate)
         self.register_buffer("phase_advance", torch.linspace(0, torch.pi * hop_length, n_freq)[..., None])
 
@@ -353,14 +353,14 @@ class TimeStretchModule(nn.Module):
 
 
 class ResampleModule(nn.Module):
-    def __init__(self, max_semitones: int = 1, random_rate_gen: Optional[RandomRateGenerator] = None):
+    def __init__(self, max_semitones: int = 1, rate_gen: Optional[RandomRateGenerator] = None):
         super().__init__()
         if max_semitones < 1:
             raise ValueError("max_semitones is supposed to be an integer >= 1 so as the actual rate "
                              "is sampled from the interval [2**(-max_semitones/12), 2**(max_semitones/12)]")
         self.max_semitones = int(max_semitones)
-        self.random_rate_gen = random_rate_gen
-        if random_rate_gen is not None:
+        self.random_rate_gen = rate_gen
+        if rate_gen is not None:
             self.random_rate_gen.set_ps_max_semitones(max_semitones)
 
     def _random_rate(self) -> Tuple[int, int]:
@@ -400,11 +400,3 @@ class FrequencyMaskingModule(nn.Module):
         spectrogram[:, f0:f1, :, :] = 0.      #   [batch, frequencies, frames, real_imag]
         return spectrogram
 
-
-if __name__ == "__main__":
-    batch = 2; n_bins = 65; n_frames = 300; hop_length = n_bins - 1
-    spec = torch.randn((batch, n_bins, n_frames, 2))
-    phase_advance = torch.linspace(0, torch.pi * hop_length, n_bins)[..., None]
-    out = phase_vocoder(spec, 1.2, phase_advance)
-
-    print("woah!")

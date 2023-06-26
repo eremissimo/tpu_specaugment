@@ -20,12 +20,12 @@ from abc import ABC
 """
 
 
-class AbstractTransform(ABC):
+class _AbstractTransform(ABC):
     pass
 
 
 @dataclass
-class STFT(AbstractTransform):
+class STFT(_AbstractTransform):
     n_fft: int
     win_length: Optional[int] = None
     hop_length: Optional[int] = None
@@ -33,7 +33,7 @@ class STFT(AbstractTransform):
 
 
 @dataclass
-class ISTFT(AbstractTransform):
+class ISTFT(_AbstractTransform):
     n_fft: Optional[int] = None
     win_length: Optional[int] = None
     hop_length: Optional[int] = None
@@ -42,7 +42,7 @@ class ISTFT(AbstractTransform):
 
 
 @dataclass
-class SpectralTransform(AbstractTransform):
+class _SpectralTransform(_AbstractTransform):
     n_fft: Optional[int] = None
     hop_length: Optional[int] = None
     # iid_params: bool = False    # whether to apply different random params to each example in a batch
@@ -50,17 +50,17 @@ class SpectralTransform(AbstractTransform):
 
 
 @dataclass
-class FrequencyMasking(SpectralTransform):
+class FrequencyMasking(_SpectralTransform):
     max_mask_len: int = 10     # max length (in bins) of the frequency mask
 
 
 @dataclass
-class PitchShift(SpectralTransform):
+class PitchShift(_SpectralTransform):
     max_semitones: int = 1        # max pitch shift in semitones
 
 
 @dataclass
-class TimeStretch(SpectralTransform):
+class TimeStretch(_SpectralTransform):
     max_rate: float = 1.1
 
 
@@ -68,12 +68,12 @@ class TimeStretch(SpectralTransform):
 
 
 @dataclass
-class _TimeStretch(TimeStretch):
+class _TimeStretchRG(TimeStretch):
     rate_gen: Optional[impl.RandomRateGenerator] = None
 
 
 @dataclass
-class _Resample(AbstractTransform):
+class _ResampleRG(_AbstractTransform):
     max_semitones: int = 1
     rate_gen: Optional[impl.RandomRateGenerator] = None
 
@@ -153,7 +153,7 @@ def _validate_params(params: List):
     if not isinstance(params[0], STFT):
         fst_stft_param = None
         for i, elem in enumerate(params[1:]):
-            if isinstance(elem, SpectralTransform):
+            if isinstance(elem, _SpectralTransform):
                 if _has_default_args(elem):
                     raise ValueError(f"n_fft is not specified for params[{i+1}].")
                 curr_stft_param = {"n_fft": elem.n_fft, "hop_length": elem.hop_length}
@@ -163,7 +163,7 @@ def _validate_params(params: List):
                     raise ValueError(f"Incompatible stft parameters found: params[0] vs params[{i+1}].")
 
 
-def _params_surgery(params: List[AbstractTransform]):
+def _params_surgery(params: List[_AbstractTransform]):
     """A transformation of parameter list containing aforementioned dataclasses to better suit the underlying
     algorithms. In other words it's a map from the interface representation to the algorithmic representation.
 
@@ -179,7 +179,7 @@ def _params_surgery(params: List[AbstractTransform]):
             if rate_gen is None:
                 rate_gen = impl.RandomRateGenerator()
             rate_gen.set_ts_max_rate(elem.max_rate)
-            params[i] = _TimeStretch(rate_gen=rate_gen, **elem.__dict__)
+            params[i] = _TimeStretchRG(rate_gen=rate_gen, **elem.__dict__)
         elif isinstance(elem, PitchShift):
             if rate_gen is None:
                 rate_gen = impl.RandomRateGenerator()
@@ -188,30 +188,30 @@ def _params_surgery(params: List[AbstractTransform]):
             if ts_in_params:
                 idx_to_del = i
             else:
-                params[i] = _TimeStretch(n_fft=elem.n_fft, hop_length=elem.hop_length,
-                                         max_rate=2**(ps_semitones/12), rate_gen=rate_gen)
+                params[i] = _TimeStretchRG(n_fft=elem.n_fft, hop_length=elem.hop_length,
+                                           max_rate=2**(ps_semitones/12), rate_gen=rate_gen)
         elif isinstance(elem, ISTFT) and ps_semitones is not None:
-            params.insert(i+1, _Resample(max_semitones=ps_semitones, rate_gen=rate_gen))
+            params.insert(i + 1, _ResampleRG(max_semitones=ps_semitones, rate_gen=rate_gen))
     if idx_to_del is not None:
         del params[idx_to_del]
 
 
-def _provide_stft_params_to_other(params: List[AbstractTransform]) -> None:
+def _provide_stft_params_to_other(params: List[_AbstractTransform]) -> None:
     if not isinstance(params[0], STFT):
         return
     stft_full_kwargs = params[0].__dict__
     stft_reduced_kwargs = {k: stft_full_kwargs[k] for k in ("n_fft", "hop_length")}
     for elem in params[1:]:
-        if isinstance(elem, (SpectralTransform, ISTFT)) and _has_default_args(elem):
-            d = stft_reduced_kwargs if isinstance(elem, SpectralTransform) else stft_full_kwargs
+        if isinstance(elem, (_SpectralTransform, ISTFT)) and _has_default_args(elem):
+            d = stft_reduced_kwargs if isinstance(elem, _SpectralTransform) else stft_full_kwargs
             _assign_attrs_from_dict(elem, d)
 
 
-def _assign_attrs_from_dict(p: AbstractTransform, d: Dict) -> None:
+def _assign_attrs_from_dict(p: _AbstractTransform, d: Dict) -> None:
     p.__dict__.update(d)
 
 
-def _has_default_args(p: Union[SpectralTransform, ISTFT]) -> bool:
+def _has_default_args(p: Union[_SpectralTransform, ISTFT]) -> bool:
     return p.n_fft is None
 
 
@@ -253,22 +253,14 @@ def params2modules(param):
     return impl.FrequencyMaskingModule(**param.__dict__)
 
 
-@dispatch(_Resample)
+@dispatch(_ResampleRG)
 def params2modules(param):
     return impl.ResampleModule(**param.__dict__)
 
 
-@dispatch(_TimeStretch)
+@dispatch(_TimeStretchRG)
 def params2modules(param):
     return impl.TimeStretchModule(**param.__dict__)
 
 
-if __name__ == "__main__":
-    module = SpecAugment(
-        STFT(n_fft=1024, hop_length=512),
-        PitchShift(max_semitones=6),
-        ISTFT()
-    )
-
-    print("woah!")
 
