@@ -120,8 +120,11 @@ class NOLA(ISTFTNormalization):
 
     def forward(self, waveform: torch.Tensor) -> torch.Tensor:
         n_frames = 1 + ((waveform.shape[-1] - self.n_fft) // self.hop_length)
-        # analogue of librosa.filters.window_sumsquare()
-        nola = ff.conv_transpose1d(torch.ones((1, n_frames)), self.window_ker, stride=self.hop_length)
+        # this does the same thing as librosa.filters.window_sumsquare() but without any looping
+        nola = ff.conv_transpose1d(
+            torch.ones((1, n_frames), dtype=self.window_ker.dtype, device=self.window_ker.device),
+            self.window_ker, stride=self.hop_length
+        )
         nola = torch.where(nola < 1e-12, 1., nola)
         waveform = waveform / nola
         return waveform
