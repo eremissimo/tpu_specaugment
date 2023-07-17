@@ -8,12 +8,11 @@ import einops
 import random
 from typing import Optional, Union, Tuple
 from fractions import Fraction
+from math import ceil
 
 
 class STFTModule(nn.Module):
-    """Basically it is a conv1d with the DFT matrix as a 1->n channel kernel.
-    Although TPUs support basic complex-valued tensor computations, there are some complications in real(), imag()
-    and casting to reals, so here and below all complex computations are emulated by real-valued tensors."""
+    """Computes STFT via RFFT(window * unfold(waveform, n_fft, hop_length))"""
     def __init__(self, n_fft: int,
                  win_length: Optional[int] = None,
                  hop_length: Optional[int] = None,
@@ -28,12 +27,10 @@ class STFTModule(nn.Module):
         self.pad = pad
         if window is None:
             window = torch.hann_window(self.win_length)
-        window = _window_pad(window, n_fft)
+        window = _window_pad(window, n_fft).unsqueeze(1)
         self.center = center
         self.pad_mode = pad_mode
-        # dft_kernel = _get_dft_matrix_manual(n_fft, window)
-        dft_kernel = _get_dft_matrix(n_fft, window, return_complex=False)
-        self.register_buffer("kernel", dft_kernel)
+        self.register_buffer("window", window)
 
     def forward(self, signal: torch.Tensor) -> torch.Tensor:
         # shape: [batch, len] or [len]
@@ -41,13 +38,21 @@ class STFTModule(nn.Module):
             signal = _signal_pad(signal, self.n_fft, self.pad_mode)
         signal, expanded_batch = _expand_dims(signal)
         # stft
-        signal = ff.conv1d(signal, self.kernel, stride=self.hop_length)
-        # real and imag parts separation
-        signal = einops.rearrange(signal, "... (ri freq) n -> ... freq n ri", ri=2)
+        if self.center:
+            unfold_padding = 0
+        else:
+            unfold_padding, _ = self._calc_unfold_params(signal.shape[-1])
+        signal = self.window * _unfold(signal, self.n_fft, self.hop_length, padding=unfold_padding)
+        signal = fft.rfft(signal, dim=-2)
         if expanded_batch:
             signal.squeeze_(0)
         # output shape: [batch, n_bins, n_frames, 2] or [n_bins, n_frames, 2]
         return signal
+
+    def _calc_unfold_params(self, length: int):
+        nframes = ceil((length - self.n_fft)/self.hop_length) + 1
+        padding = self.hop_length*(nframes - 1) - length + self.n_fft
+        return padding, nframes
 
 
 class ISTFTModule(nn.Module):
@@ -99,8 +104,8 @@ class ISTFTNormalization(nn.Module):
 
 
 class COLA(ISTFTNormalization):
-    """Divides the waveform by the COLA constant. This method is fast but presents attenuation artifacts
-    (~n_fft samples at the beginning and the end of the waveform)"""
+    """Constant Overlap-Add. Divides the waveform by the COLA constant. This method is fast but presents attenuation
+    artifacts (~n_fft samples at the beginning and the end of the waveform)"""
     def __init__(self, n_fft: int, hop_length: int, window: torch.Tensor):
         super().__init__()
         inv_cola_c = hop_length / (window ** 2).sum()      # inverse of COLA constant [tested only on Hann window]
@@ -111,7 +116,7 @@ class COLA(ISTFTNormalization):
 
 
 class NOLA(ISTFTNormalization):
-    """This method is slower but reduces the attenuation."""
+    """Nonzero Overlap-Add. This method is slower but reduces the attenuation."""
     def __init__(self, n_fft: int, hop_length: int, window: torch.Tensor):
         super().__init__()
         self.register_buffer("window_ker", window[None, None, :] ** 2)
@@ -128,6 +133,27 @@ class NOLA(ISTFTNormalization):
         nola = torch.where(nola < 1e-12, 1., nola)
         waveform = waveform / nola
         return waveform
+
+
+def _unfold(signal: torch.Tensor, kernel_size: int, stride: int = 1, padding: int = 0, center_pad=False):
+    signal = _unfold_pad(signal, padding, center_pad, value=0.)
+    n = signal.shape[-1]
+    device = signal.device
+    # broadcasted sum
+    idxs = torch.arange(kernel_size, device=device, dtype=torch.int64).unsqueeze(1) + \
+           torch.arange(0, stride*((n-kernel_size)//stride)+1, stride, device=device, dtype=torch.int64)
+    return signal[..., idxs]
+
+
+def _unfold_pad(signal: torch.Tensor, padding: int = 0, center=False, value=0.):
+    if padding:
+        if center:
+            half_pad = padding // 2
+            signal = ff.pad(signal, (half_pad, padding-half_pad), value=value)
+        else:
+            # pad the end of signal
+            signal = ff.pad(signal, (0, padding), value=value)
+    return signal
 
 
 def _window_pad(window, n_fft):
@@ -153,10 +179,8 @@ def _expand_dims(input):
     expanded_batch = False
     if input.dim() == 1:
         expanded_batch = True
-        input = input[None, None,:]
-    elif input.dim() == 2:
-        input = input.unsqueeze(1)       # added channel dim
-    else:
+        input = input.unsqueeze(0)
+    elif input.dim() > 2:
         raise RuntimeError("expected a 1D or 2D tensor")
     return input, expanded_batch
 

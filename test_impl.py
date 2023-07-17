@@ -20,7 +20,7 @@ def test_stft(batch=2, n_fft=1024, hop_length=256):
     waveform = torch.randn((batch, 10*n_fft))
     # window = torch.hann_window(n_fft)
     window = barlett_window(n_fft)
-    spec_torch = torch.stft(waveform, n_fft, hop_length=hop_length, window=window, return_complex=False, center=False)
+    spec_torch = torch.stft(waveform, n_fft, hop_length=hop_length, window=window, return_complex=True, center=False)
     specmodule = impl.STFTModule(n_fft, hop_length=hop_length, window=window)
     spec_impl = specmodule(waveform)
     assert torch.isclose(spec_torch, spec_impl, atol=1e-4, rtol=1e-4).all()
@@ -73,6 +73,4 @@ def cosine_window(M, sym=True):
                        dtype=torch.float32,
                        requires_grad=False)
     return torch.sin(k)
-
-
 
