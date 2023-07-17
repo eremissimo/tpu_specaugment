@@ -67,8 +67,13 @@ functions for that:
    
 So basically to get a workaround, STFT and ISTFT are implemented here as a strided 
 convolutions and a transposed convolutions respectively with the DFT matrices, 
-phase vocoder is reimplemented (based on original torchaidio code) to emulate 
+phase vocoder is reimplemented (based on original torchaudio code) to emulate 
 complex computations with real-valued tensors. 
+
+UPD: STFT as conv1d and ISTFT as conv_transpose1d are still slow for large n_fft values. 
+In current iteration STFT is implemented as `torch.rfft(_unfold(waveform))`
+and ISTFT as `_overlap_add(torch.irfft(spectrogram))` where `_unfold` and 
+`_overlap_add` use indices manipulations only.
 
 ## Dependencies
 * pytorch
@@ -101,4 +106,5 @@ complex computations with real-valued tensors.
    shifting strategy must be performed i.e. that works on time-frequency domain directly.
    
 ## TODO list
+- [ ] implement STFT and ISTFT using index manipulations and torch.rfft/torch.irfft
 - [ ] spectrogram-to-spectrogram pitch shifting
